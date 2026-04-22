@@ -176,8 +176,8 @@ app.post('/generate', async (req, res) => {
     let film;
     try {
       film = JSON.parse(clean);
-    } catch {
-      console.error("JSON parse failed:";clean);
+    } catch (error) {
+      console.error('JSON parse failed:',clean);
       return res.status(500).json({
         error: 'AI ne galat format mein response diya. Dobara try karein.',
         code: 'PARSE_ERROR',
@@ -189,7 +189,7 @@ app.post('/generate', async (req, res) => {
     return res.json({ success: true, film });
 
   } catch (err) {
-  console.error('FULL ERROR:', err); // 👈 CHANGE THIS
+  console.error('FULL ERROR:', err); //
 
   return res.status(500).json({
     error: err.message || "Internal error",
