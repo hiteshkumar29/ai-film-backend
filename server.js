@@ -44,7 +44,8 @@ app.use(cors({
   allowedHeaders: ['Content-Type'],
 }));
 
-app.use(express.json({ limit: '10kb' })); // Limit request body size
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 // ─── Rate Limiting ────────────────────────────────────────────────────────────
 const limiter = rateLimit({
