@@ -177,10 +177,11 @@ app.post('/generate', async (req, res) => {
     try {
       film = JSON.parse(clean);
     } catch {
-      console.error('JSON parse failed. Raw output:', raw.slice(0, 300));
+      console.error("JSON parse failed:";clean);
       return res.status(500).json({
         error: 'AI ne galat format mein response diya. Dobara try karein.',
         code: 'PARSE_ERROR',
+        raw: clean
       });
     }
 
@@ -188,7 +189,13 @@ app.post('/generate', async (req, res) => {
     return res.json({ success: true, film });
 
   } catch (err) {
-    console.error('Generate error:', err?.message || err);
+  console.error('FULL ERROR:', err); // 👈 CHANGE THIS
+
+  return res.status(500).json({
+    error: err.message || "Internal error",
+    details: err
+  });
+}
 
     // Anthropic-specific errors
     if (err?.status === 429) {
