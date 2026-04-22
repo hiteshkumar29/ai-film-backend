@@ -1,163 +1,112 @@
-/**
- * AI Film Studio — Secure Backend
- */
-
 const express = require('express');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
-const Anthropic = require('@anthropic-ai/sdk');
+const axios = require('axios');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// ─── Anthropic Client ─────────────────────────────────────────
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-});
-
-// ─── CORS ─────────────────────────────────────────────────────
-const allowedOrigins = [
-  process.env.FRONTEND_URL,
-  'http://localhost:3000',
-  'http://localhost:5500',
-  'http://127.0.0.1:5500',
-  'null',
-].filter(Boolean);
-
-app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error(`CORS blocked: ${origin}`)); // ✅ FIXED
-    }
-  },
-  methods: ['POST', 'GET', 'OPTIONS'],
-  allowedHeaders: ['Content-Type'],
-}));
-
+// ─── CORS ─────────────────────────────────────
+app.use(cors());
 app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
 
-// ─── Rate Limiting ────────────────────────────────────────────
+// ─── Rate Limit ───────────────────────────────
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 20,
-  standardHeaders: true,
-  legacyHeaders: false,
 });
 app.use('/generate', limiter);
 
-// ─── Utils ───────────────────────────────────────────────────
-function sanitizeString(str, maxLen = 500) {
-  if (typeof str !== 'string') return '';
-  return str
-    .replace(/<[^>]*>/g, '')
-    .replace(/[\x00-\x1F\x7F]/g, '')
-    .trim()
-    .slice(0, maxLen);
-}
-
-function validateScenes(n) {
-  const parsed = parseInt(n, 10);
-  return [3, 5, 7].includes(parsed) ? parsed : 5;
-}
-
-function validateLanguage(lang) {
-  const allowed = ['hindi', 'english', 'urdu'];
-  return allowed.includes(lang) ? lang : 'hindi';
-}
-
-// ─── Prompt Builder ──────────────────────────────────────────
-function buildPrompt(idea, language, scenes) {
-  return `Create a short animated film story.
-
-Idea: "${idea}"
-Language: ${language}
-Scenes: ${scenes}
-
-Return ONLY JSON format.`;
-}
-
-// ─── Health Check ────────────────────────────────────────────
+// ─── Health Check ─────────────────────────────
 app.get('/', (req, res) => {
-  res.json({ status: 'ok', service: 'AI Film Studio API' });
+  res.json({ status: 'ok', service: 'DeepSeek API Working 🚀' });
 });
 
-// ─── Generate Endpoint ───────────────────────────────────────
+// ─── Generate Endpoint ────────────────────────
 app.post('/generate', async (req, res) => {
   try {
-    const idea = sanitizeString(req.body.idea, 800);
-    const language = validateLanguage(req.body.language);
-    const scenes = validateScenes(req.body.scenes);
+    const { idea, language = 'english', scenes = 5 } = req.body;
 
-    if (!idea || idea.length < 5) {
+    // ❗ Validation
+    if (!idea || idea.length < 10) {
       return res.status(400).json({
-        error: 'Idea too short or missing.',
-        code: 'INVALID_INPUT',
+        error: 'Idea too short',
       });
     }
 
-    if (!process.env.ANTHROPIC_API_KEY) {
+    // ❗ API Key Check
+    if (!process.env.DEEPSEEK_API_KEY) {
       return res.status(500).json({
         error: 'API key missing',
-        code: 'SERVER_ERROR',
       });
     }
 
-    const prompt = buildPrompt(idea, language, scenes);
+    // ─── Prompt ───────────────────────────────
+    const prompt = `
+Create a cinematic short film story.
 
-    const message = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 2000,
-      messages: [{ role: 'user', content: prompt }],
-    });
+Idea: ${idea}
 
-    const raw = message.content
-      .filter(b => b.type === 'text')
-      .map(b => b.text)
-      .join('');
+Language: ${language}
 
-    const clean = raw.replace(/```/g, '').trim();
+Scenes: ${scenes}
 
-    let film;
+Return ONLY JSON in this format:
+{
+"title": "",
+"scenes": [
+  {
+    "scene": 1,
+    "description": "",
+    "dialogue": ""
+  }
+]
+}
+`;
+
+    // ─── DeepSeek API Call ───────────────────
+    const response = await axios.post(
+      'https://api.deepseek.com/v1/chat/completions',
+      {
+        model: 'deepseek-chat',
+        messages: [
+          { role: 'user', content: prompt }
+        ],
+        temperature: 0.7
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.DEEPSEEK_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+      }
+    );
+
+    const text = response.data.choices[0].message.content;
+
+    // ─── JSON Parse ───────────────────────────
+    let result;
     try {
-      film = JSON.parse(clean);
-    } catch (e) {
-      console.error("JSON parse failed:", clean); // ✅ FIXED
+      result = JSON.parse(text);
+    } catch {
       return res.status(500).json({
-        error: 'Invalid AI response format',
-        code: 'PARSE_ERROR',
+        error: 'JSON parse error',
+        raw: text,
       });
     }
 
-    return res.json({ success: true, film });
+    return res.json({ success: true, data: result });
 
   } catch (err) {
-    console.error('FULL ERROR:', err);
-
-    if (err?.status === 429) {
-      return res.status(429).json({
-        error: 'Rate limit reached',
-        code: 'RATE_LIMIT',
-      });
-    }
-
-    if (err?.status === 401) {
-      return res.status(500).json({
-        error: 'API key issue',
-        code: 'AUTH_ERROR',
-      });
-    }
+    console.error(err.response?.data || err.message);
 
     return res.status(500).json({
-      error: err.message || "Internal error",
-      code: "UNKNOWN_ERROR",
+      error: err.response?.data || 'Server error',
     });
   }
 });
 
-// ─── Start Server ────────────────────────────────────────────
+// ─── Start Server ────────────────────────────
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`); // ✅ FIXED
+  console.log(`Server running on port ${PORT}`);
 });
